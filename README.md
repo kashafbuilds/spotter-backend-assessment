@@ -1,26 +1,47 @@
 # Spotter Backend Assessment
 
-A Django REST Framework backend for managing fuel station data, filtering and sorting fuel prices, and finding nearby fuel stations using geographic coordinates.
+A Django REST Framework backend for the Spotter Backend Engineer assessment.
+
+The API accepts start and finish coordinates within the USA, calculates a driving route, identifies cost-effective fueling locations along the route, respects a vehicle maximum range of 500 miles, and estimates total fuel cost using a fuel economy of 10 miles per gallon.
 
 ## Tech Stack
 
 * Python 3
-* Django
+* Django 5.2
 * Django REST Framework
 * SQLite
 * OpenRouteService
+* Requests
 * python-decouple
+
+## Key Features
+
+* Fuel station data imported from the provided CSV
+* 8,151 fuel station records
+* Fuel station filtering by state and city
+* Fuel price filtering
+* Fuel price sorting
+* Nearby fuel station search
+* Driving route calculation
+* Fuel-stop optimization for routes longer than 500 miles
+* 500-mile maximum vehicle range
+* 10 MPG fuel economy assumption
+* Total estimated fuel consumption and cost
+* Automated API tests
+* Environment-based API key configuration
+
+---
 
 ## Project Setup
 
 ### 1. Clone the repository
 
 ```bash
-git clone <your-repository-url>
-cd Spotter-Backend-Assessment
+git clone https://github.com/kashafbuilds/spotter-backend-assessment.git
+cd spotter-backend-assessment
 ```
 
-### 2. Create and activate virtual environment
+### 2. Create and activate the virtual environment
 
 Windows PowerShell:
 
@@ -53,13 +74,13 @@ python manage.py migrate
 
 ### 6. Import fuel station data
 
-The fuel station CSV is located at:
+The provided fuel-price dataset is located at:
 
 ```text
 data/fuel-prices.csv
 ```
 
-Run:
+Import the data with:
 
 ```bash
 python manage.py import_fuel_data
@@ -77,45 +98,36 @@ The API will be available at:
 http://127.0.0.1:8000/
 ```
 
-## API Endpoints
+---
 
-### API Root
+# API Endpoints
+
+## API Root
 
 ```http
 GET /api/
 ```
 
-### Products
-
-```http
-GET /api/products/
-GET /api/products/<id>/
-POST /api/products/
-PUT /api/products/<id>/
-PATCH /api/products/<id>/
-DELETE /api/products/<id>/
-```
-
-### Fuel Stations
+## Fuel Stations
 
 ```http
 GET /api/fuel-stations/
 GET /api/fuel-stations/<id>/
 ```
 
-### Filter by State
+## Filter by State
 
 ```http
 GET /api/fuel-stations/?state=OK
 ```
 
-### Filter by City
+## Filter by City
 
 ```http
 GET /api/fuel-stations/?city=Tulsa
 ```
 
-### Filter by Price
+## Filter by Price
 
 Minimum price:
 
@@ -135,7 +147,7 @@ Price range:
 GET /api/fuel-stations/?min_price=3.00&max_price=3.50
 ```
 
-### Sort by Retail Price
+## Sort by Retail Price
 
 Lowest to highest:
 
@@ -149,21 +161,177 @@ Highest to lowest:
 GET /api/fuel-stations/?ordering=-retail_price
 ```
 
-### Nearby Fuel Stations
+---
+
+# Nearby Fuel Stations
+
+Endpoint:
 
 ```http
-GET /api/fuel-stations/nearby/?latitude=35.4676&longitude=-97.5164&radius=50
+GET /api/fuel-stations/nearby/
 ```
 
-Parameters:
+Required parameters:
 
-* `latitude` — required
-* `longitude` — required
-* `radius` — optional, in kilometers; default is 10 km
+* `lat`
+* `lon`
 
-The nearby endpoint uses the Haversine formula to calculate geographic distance.
+Optional parameter:
 
-## Pagination
+* `radius_km` — search radius in kilometers; default is 50 km
+
+Example:
+
+```http
+GET /api/fuel-stations/nearby/?lat=35.4676&lon=-97.5164&radius_km=50
+```
+
+The endpoint calculates the geographic distance between the requested coordinates and available fuel stations using the Haversine formula.
+
+Results are returned sorted by distance.
+
+### Validation
+
+Missing coordinates:
+
+```http
+GET /api/fuel-stations/nearby/
+```
+
+Returns HTTP 400.
+
+Invalid coordinates:
+
+```http
+GET /api/fuel-stations/nearby/?lat=abc&lon=-97.5164&radius_km=50
+```
+
+Returns HTTP 400.
+
+Invalid radius:
+
+```http
+GET /api/fuel-stations/nearby/?lat=35.4676&lon=-97.5164&radius_km=0
+```
+
+Returns HTTP 400.
+
+---
+
+# Route and Fuel Optimization
+
+## Endpoint
+
+```http
+GET /api/fuel-stations/route/
+```
+
+Required parameters:
+
+* `start_lat`
+* `start_lon`
+* `finish_lat`
+* `finish_lon`
+
+Example:
+
+```http
+GET /api/fuel-stations/route/?start_lat=40.7128&start_lon=-74.0060&finish_lat=41.8781&finish_lon=-87.6298
+```
+
+This example represents a route from New York City to Chicago.
+
+## Route Calculation
+
+The route is calculated using OpenRouteService's driving directions API.
+
+The API returns:
+
+* Route distance in miles
+* Estimated duration in minutes
+* Route geometry as GeoJSON
+* Fuel stops
+* Fuel price at selected stations
+* Distance between fuel stops
+* Estimated gallons required
+* Fuel cost
+* Total fuel consumption
+* Total estimated fuel cost
+
+## Vehicle Assumptions
+
+The assessment specifies:
+
+```text
+Maximum vehicle range: 500 miles
+Fuel economy: 10 miles per gallon
+```
+
+These values are represented in the API response:
+
+```json
+{
+    "max_range_miles": 500.0,
+    "fuel_economy_mpg": 10.0
+}
+```
+
+## Fuel Optimization
+
+For longer routes, the API builds candidate fueling locations near the calculated route.
+
+Candidate stations are limited to a route corridor of approximately 50 miles.
+
+A dynamic-programming approach is used to select a feasible sequence of fuel stops while respecting the vehicle's 500-mile maximum range.
+
+For each possible leg:
+
+```text
+gallons required = leg distance / 10 MPG
+```
+
+and:
+
+```text
+fuel cost = gallons required × fuel price
+```
+
+The selected plan must ensure that every individual driving leg remains within the 500-mile vehicle range.
+
+The response also reports the final leg to the destination.
+
+---
+
+# Example Route Response
+
+A successful route response contains the following main sections:
+
+```json
+{
+    "route": {
+        "distance_miles": 796.7,
+        "duration_minutes": 831.61,
+        "geometry": {}
+    },
+    "vehicle": {
+        "max_range_miles": 500.0,
+        "fuel_economy_mpg": 10.0
+    },
+    "fuel_plan": {
+        "stops": [],
+        "total_fuel_gallons": 79.67,
+        "total_fuel_cost": 244.24,
+        "stations_considered": 71,
+        "final_leg_miles": 319.64
+    }
+}
+```
+
+The actual response includes the complete GeoJSON route geometry and selected fuel station details.
+
+---
+
+# Pagination
 
 Fuel station results use page-number pagination.
 
@@ -179,53 +347,15 @@ Example:
 GET /api/fuel-stations/?page=2
 ```
 
-## Nearby API Validation
+---
 
-Missing coordinates:
+# Data
 
-```http
-GET /api/fuel-stations/nearby/
+The provided fuel dataset contains:
+
+```text
+8,151 fuel station records
 ```
-
-Returns:
-
-```json
-{
-    "error": "latitude and longitude are required."
-}
-```
-
-Invalid coordinates:
-
-```http
-GET /api/fuel-stations/nearby/?latitude=abc&longitude=-97.5164&radius=50
-```
-
-Returns:
-
-```json
-{
-    "error": "latitude, longitude and radius must be numbers."
-}
-```
-
-Invalid radius:
-
-```http
-GET /api/fuel-stations/nearby/?latitude=35.4676&longitude=-97.5164&radius=0
-```
-
-Returns:
-
-```json
-{
-    "error": "radius must be greater than 0."
-}
-```
-
-## Data
-
-The provided fuel dataset contains 8,151 fuel station records.
 
 The CSV contains:
 
@@ -237,19 +367,37 @@ The CSV contains:
 * Rack ID
 * Retail Price
 
-Latitude and longitude fields are stored in the database for geographic search functionality.
+The original CSV does not contain latitude and longitude fields.
 
-## Geocoding
+Latitude and longitude fields were therefore added to the database model to support geographic and route-based functionality.
 
-OpenRouteService is used to geocode fuel station locations.
+---
 
-Because the provided CSV does not contain latitude and longitude values, geographic coordinates are generated from city/state locations.
+# Geocoding
 
-The OpenRouteService API key is loaded securely from the `.env` file using `python-decouple`.
+Because the supplied CSV does not include coordinates, fuel station coordinates were generated using OpenRouteService geocoding based on station city/state information.
 
-## Testing
+This is an approximation rather than exact address-level geocoding.
 
-Run Django's system checks:
+Only stations with available coordinates can participate in geographic and route-corridor calculations.
+
+The OpenRouteService API key is loaded from `.env` using `python-decouple`.
+
+---
+
+# Routing API Usage
+
+The project uses OpenRouteService for driving route calculation.
+
+The route endpoint is designed to make a single routing request for a start and finish location and then perform fuel-station selection locally.
+
+This helps minimize external routing API calls.
+
+---
+
+# Testing
+
+Run Django system checks:
 
 ```bash
 python manage.py check
@@ -261,28 +409,122 @@ Expected result:
 System check identified no issues (0 silenced).
 ```
 
-The API was manually tested for:
+Run automated tests:
+
+```bash
+python manage.py test
+```
+
+Current test suite:
+
+```text
+Found 6 test(s).
+......
+Ran 6 tests
+OK
+```
+
+The automated tests cover:
 
 * Fuel station listing
-* Pagination
 * State filtering
 * City filtering
+* Nearby endpoint validation
+* Nearby station search
+* Route endpoint required-parameter validation
+
+Additional manual testing was performed for:
+
+* Pagination
 * Minimum price filtering
 * Maximum price filtering
 * Price range filtering
 * Ascending price sorting
 * Descending price sorting
 * Nearby station search
-* Missing parameter validation
-* Invalid parameter validation
-* Radius validation
+* Invalid coordinates
+* Invalid radius
+* Long-distance route calculation
+* Fuel-stop selection
+* 500-mile range constraints
 
-## Security
+---
 
-Sensitive API keys are stored in `.env` and should not be committed to version control.
+# Known Limitations and Assumptions
 
-The `.env` file should be included in `.gitignore`.
+### 1. Coordinate accuracy
 
-## License
+The provided fuel-price CSV does not contain latitude/longitude data.
 
-This project was created as part of a backend coding assessment.
+Station coordinates are therefore based on city/state geocoding and should be treated as approximate.
+
+### 2. Route corridor
+
+Candidate stations are considered when they are approximately within 50 miles of the calculated route.
+
+### 3. Input format
+
+The route endpoint currently accepts latitude and longitude coordinates rather than text addresses.
+
+This avoids an additional address-geocoding request for the user's start and finish locations.
+
+### 4. Fuel consumption
+
+Fuel consumption is estimated using the fixed assessment assumption of:
+
+```text
+10 miles per gallon
+```
+
+Therefore:
+
+```text
+total gallons = route miles / 10
+```
+
+### 5. Fuel pricing model
+
+Fuel cost is estimated using the retail price supplied by the provided dataset.
+
+The optimization focuses on selecting feasible, cost-effective fueling locations under the 500-mile vehicle range constraint.
+
+### 6. Geographic distance approximation
+
+The route-corridor calculation uses geographic distance approximations rather than exact road-network distance from every station to every route segment.
+
+---
+
+# Security
+
+Sensitive API keys are stored in `.env` and must not be committed to version control.
+
+The `.env` file is included in `.gitignore`.
+
+Never place the OpenRouteService API key directly in source code or the README.
+
+---
+
+# GitHub
+
+Repository:
+
+```text
+https://github.com/kashafbuilds/spotter-backend-assessment
+```
+
+---
+
+# Assessment Deliverables
+
+The project includes:
+
+* Django REST API
+* Fuel station dataset import
+* Route calculation
+* Fuel-stop optimization
+* Fuel cost estimation
+* Automated tests
+* Environment-based API configuration
+* GitHub source code
+
+A short Loom demonstration should show the route endpoint being called through Postman or another API client, followed by a brief overview of the implementation.
